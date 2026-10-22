@@ -25,8 +25,8 @@ public final class Config {
                     "Guard read-only Level lookups made from the server thread during a server tick",
                     "when the target chunk is not fully loaded.",
                     "",
-                    "This covers Level.getHeight(), Level.getFluidState() and Level.getBlockEntity()",
-                    "and Level.getBlockEntity(). These are the methods used by most spawner mods",
+                    "This covers Level.getHeight(), Level.getFluidState() and Level.getBlockEntity().",
+                    "These are the methods used by most spawner mods",
                     "to probe a random position for a valid spawn. If the chunk is not loaded,",
                     "the guard returns the same kind of empty/min-height value vanilla would",
                     "return for an absent chunk, instead of synchronously loading the chunk.")
@@ -38,8 +38,10 @@ public final class Config {
                     "",
                     "This covers Level.getChunkAt(), Level.getChunk(), and",
                     "ServerChunkCache.getChunk() when the caller is a mod, the chunk is not",
-                    "loaded, no chunk holder exists yet, and the call is not part of worldgen",
-                    "or a block/entity write. In that case an empty LevelChunk is returned.",
+                    "loaded, and the call is not part of worldgen or a block/entity write.",
+                    "Read paths are guarded even if a (partially loaded) chunk holder exists;",
+                    "other direct chunk requests are left alone while a holder exists.",
+                    "In guarded cases an empty LevelChunk is returned.",
                     "",
                     "Disable this if a mod genuinely needs to force-load a chunk synchronously",
                     "during a tick. The Level read guard above is usually enough for spawners.")

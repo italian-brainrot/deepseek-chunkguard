@@ -173,7 +173,12 @@ public final class Guard {
             if (stack.writePath()) {
                 return false;
             }
-            if (hasVisibleChunk(serverLevel, chunkX, chunkZ)) {
+            // A chunk holder can exist while the chunk is still only partially
+            // loaded. Reads from that chunk are exactly the calls that park the
+            // server thread. Only skip holder-backed chunks for direct chunk
+            // access that is not part of a normal read path, so mods that
+            // deliberately request a chunk for a write keep working.
+            if (!stack.readPath() && hasVisibleChunk(serverLevel, chunkX, chunkZ)) {
                 return false;
             }
         }
@@ -220,6 +225,7 @@ public final class Guard {
         return WALKER.walk(frames -> {
             boolean modFrame = false;
             boolean writePath = false;
+            boolean readPath = false;
             boolean worldgen = false;
             boolean exempt = false;
             StackTraceElement firstModFrame = null;
@@ -232,6 +238,9 @@ public final class Guard {
 
                 if (isWriteFrame(className, methodName)) {
                     writePath = true;
+                }
+                if (isReadFrame(className, methodName)) {
+                    readPath = true;
                 }
                 if (isWorldgenFrame(className)) {
                     worldgen = true;
@@ -247,7 +256,7 @@ public final class Guard {
                 }
             }
 
-            return new StackInfo(modFrame, firstModFrame, writePath, worldgen, exempt);
+            return new StackInfo(modFrame, firstModFrame, writePath, readPath, worldgen, exempt);
         });
     }
 
@@ -324,6 +333,24 @@ public final class Guard {
     }
 
     /**
+     * Vanilla read methods that may request a chunk. If one of these is on the
+     * stack, a partially loaded chunk must not be allowed to block the tick.
+     * This covers the common {@code BlockEntity.setChanged()} path, which ends
+     * up in {@code Level.updateNeighbourForOutputSignal()} and then
+     * {@code Level.getBlockState()} on a neighbouring, still-loading chunk.
+     */
+    private static boolean isReadFrame(String className, String methodName) {
+        if (className.equals("net.minecraft.world.level.Level")) {
+            return methodName.equals("getBlockState")
+                    || methodName.equals("getFluidState")
+                    || methodName.equals("getHeight")
+                    || methodName.equals("getBlockEntity")
+                    || methodName.equals("updateNeighbourForOutputSignal");
+        }
+        return false;
+    }
+
+    /**
      * Do not second-guess the chunk generator. These frames mean the current
      * lookup is part of normal world generation, not a tick-time probe.
      */
@@ -392,6 +419,7 @@ public final class Guard {
             boolean modFrame,
             StackTraceElement firstModFrame,
             boolean writePath,
+            boolean readPath,
             boolean worldgen,
             boolean exempt) {
     }

@@ -31,6 +31,8 @@ public final class ChunkGuard {
             "net.satisfy.lilis_lucky_lures.core.util.FloatingPoolsSpawner";
     private static final String EXTRA_BIOMES_TARGET =
             "net.winepicfin.extrabiomes.entity.custom.GlacierSnowGolemSpawner";
+    private static final String COBBLEMON_TARGET =
+            "com.cobblemon.mod.common.block.habitat.HabitatBlockEntity";
 
     public ChunkGuard(IEventBus modEventBus, ModContainer modContainer) {
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
@@ -40,9 +42,10 @@ public final class ChunkGuard {
         LOGGER.info("[ChunkGuard] Loaded. Guarding mod chunk probes made from the server tick thread.");
         LOGGER.info(
                 "[ChunkGuard] Known blocking-probe classes present: Lilis FloatingPoolsSpawner={}, "
-                        + "ExtraBiomes GlacierSnowGolemSpawner={}",
+                        + "ExtraBiomes GlacierSnowGolemSpawner={}, Cobblemon HabitatBlockEntity={}",
                 classPresent(LILIS_TARGET),
-                classPresent(EXTRA_BIOMES_TARGET));
+                classPresent(EXTRA_BIOMES_TARGET),
+                classPresent(COBBLEMON_TARGET));
     }
 
     private void onConfigLoading(ModConfigEvent.Loading event) {

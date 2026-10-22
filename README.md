@@ -32,7 +32,7 @@ This is not the server thread "generating" a chunk. It is the server thread **wa
 
 ## What ChunkGuard does
 
-ChunkGuard is deliberately generic. It does not patch Lilis or ExtraBiomes directly.
+ChunkGuard is deliberately generic. It does not patch Lilis, ExtraBiomes or Cobblemon directly.
 
 1. It marks the server tick (`ServerLevel.tick` and `MinecraftServer.tickServer`).
 2. On the server thread, for a mod call stack, if the target chunk is not fully loaded:
@@ -41,14 +41,16 @@ ChunkGuard is deliberately generic. It does not patch Lilis or ExtraBiomes direc
    - `Level.getBlockEntity` returns `null`.
    - Direct chunk access through `ServerChunkCache.getChunk` returns an empty `LevelChunk` (void air, no block entities).
 3. It never interferes with:
-   - Chunks that are already loaded.
+   - Chunks that are already fully loaded.
    - Chunk generation/worldgen stacks.
    - Block or entity **writes** (those still load chunks normally).
    - Vanilla, NeoForge, C2ME, Mixin, and normal library frames.
-   - Normal chunk loads that already have a chunk holder (the chunk is already in the pipeline).
+   - Direct chunk requests that are not part of a read path and already have a chunk holder.
 4. It rate-limits log messages and reports which mod/call site was blocked, so the next offender is easy to find.
 
-The result for a spawner probe is that it sees an unloaded/empty position and rejects it, instead of forcing the server thread to wait for a chunk load.
+A read path (for example `Level.getBlockState` called from `BlockEntity.setChanged`) is still guarded when a chunk holder exists, because a partially loaded chunk can still block the server thread. Writes and direct load requests keep their normal behavior.
+
+The result for a spawner or block-entity probe is that it sees an unloaded/empty position and rejects it, instead of forcing the server thread to wait for a chunk load.
 
 ## Known targets
 
@@ -56,6 +58,7 @@ The guard is generic, but these are the confirmed blockers in the affected insta
 
 - **Lilis Lucky Lures** — `net.satisfy.lilis_lucky_lures.core.util.FloatingPoolsSpawner`
 - **ExtraBiomes** — `net.winepicfin.extrabiomes.entity.custom.GlacierSnowGolemSpawner`
+- **Cobblemon** — `com.cobblemon.mod.common.block.habitat.HabitatBlockEntity` (ticks `setChanged`, which reads neighbouring chunks)
 
 The addon logs at startup whether those classes are present.
 
@@ -65,7 +68,7 @@ The addon logs at startup whether those classes are present.
    ```bash
    ./gradlew build
    ```
-2. Copy `build/libs/chunkguard-1.0.0.jar` into the instance's `mods/` folder.
+2. Copy `build/libs/chunkguard-1.0.1.jar` into the instance's `mods/` folder.
 3. Start the game.
 
 The mixins are common mixins, so the same jar works on a dedicated server.
@@ -77,8 +80,8 @@ The config file is `config/chunkguard-common.toml`.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `enabled` | `true` | Master switch. |
-| `guardLevelReads` | `true` | Guard `getHeight`, `getFluidState`, `getBlockEntity` on unloaded chunks. |
-| `guardChunkAccess` | `true` | Guard direct `ServerChunkCache.getChunk` calls from mods when no chunk holder exists. This also covers mod `getBlockState` probes. |
+| `guardLevelReads` | `true` | Guard `getHeight`, `getFluidState`, and `getBlockEntity` reads on unloaded chunks. |
+| `guardChunkAccess` | `true` | Guard `ServerChunkCache.getChunk` calls from mods when the chunk is not loaded. This covers `getBlockState` probes, including partially loaded chunks that still have a holder. |
 | `logBlockedCalls` | `true` | Log prevented calls. |
 | `logFullStack` | `false` | Log a full stack trace the first time a caller is blocked. |
 | `logIntervalSeconds` | `30` | Minimum time between log messages for the same caller. |
