@@ -22,8 +22,8 @@ public final class Config {
 
     public static final ModConfigSpec.BooleanValue GUARD_LEVEL_READS = BUILDER
             .comment(
-                    "Guard read-only Level lookups made from the server thread during a server tick",
-                    "when the target chunk is not fully loaded.",
+                    "Guard read-only Level lookups made from the server thread during a tick",
+                    "or the between-tick task phase, when the target chunk is not fully loaded.",
                     "",
                     "This covers Level.getHeight(), Level.getFluidState() and Level.getBlockEntity().",
                     "These are the methods used by most spawner mods",
@@ -37,8 +37,9 @@ public final class Config {
                     "Also guard direct chunk access made by mods from the server thread during a tick.",
                     "",
                     "This covers Level.getChunkAt(), Level.getChunk(), and",
-                    "ServerChunkCache.getChunk() when the caller is a mod, the chunk is not",
-                    "loaded, and the call is not part of worldgen or a block/entity write.",
+                    "ServerChunkCache.getChunk() when the caller is a mod or a vanilla",
+                    "spawn-placement probe, the chunk is not loaded, and the call is not",
+                    "part of worldgen or a block/entity write.",
                     "Read paths are guarded even if a (partially loaded) chunk holder exists;",
                     "other direct chunk requests are left alone while a holder exists.",
                     "In guarded cases an empty LevelChunk is returned.",

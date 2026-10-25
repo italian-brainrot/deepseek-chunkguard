@@ -18,6 +18,11 @@ import org.slf4j.Logger;
  * server thread and, with a busy chunk pipeline such as C2ME, can park the whole
  * server tick for minutes.</p>
  *
+ * <p>Vanilla has the same pattern: zombie reinforcements call
+ * {@code SpawnPlacements.isSpawnPositionOk} on up to 50 random positions, and
+ * those checks can walk into unloaded chunks while a player attack is being
+ * processed between ticks.</p>
+ *
  * <p>ChunkGuard returns vanilla-safe empty values for those unloaded-chunk
  * reads. It deliberately leaves normal world generation, block writes and
  * already-loaded chunks alone.</p>

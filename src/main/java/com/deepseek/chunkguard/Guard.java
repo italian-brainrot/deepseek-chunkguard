@@ -67,6 +67,22 @@ public final class Guard {
     }
 
     /**
+     * Marks the phase where the server drains queued work (packets, scheduled
+     * tasks) between ticks. A player attack or teleport is handled here, not
+     * inside {@code ServerLevel.tick}.
+     */
+    public static void enterServerTasks() {
+        TICK.get().serverTaskDepth++;
+    }
+
+    public static void exitServerTasks() {
+        TickState state = TICK.get();
+        if (state.serverTaskDepth > 0) {
+            state.serverTaskDepth--;
+        }
+    }
+
+    /**
      * Guard Level.getHeight(Heightmap.Types, int, int).
      */
     public static boolean shouldGuardHeight(Level level, int blockX, int blockZ, String accessor) {
@@ -142,7 +158,7 @@ public final class Guard {
         }
 
         TickState tick = TICK.get();
-        if (tick.levelTickDepth <= 0 && tick.serverTickDepth <= 0) {
+        if (tick.levelTickDepth <= 0 && tick.serverTickDepth <= 0 && tick.serverTaskDepth <= 0) {
             return false;
         }
 
@@ -159,8 +175,12 @@ public final class Guard {
 
         StackInfo stack = inspectStack();
         if (!stack.modFrame()) {
-            // Leave vanilla, NeoForge and C2ME internals alone.
-            return false;
+            // Vanilla spawn placement is the one non-mod path we special-case.
+            // Zombie reinforcements probe 50 random positions and can walk into
+            // unloaded chunks while the server is draining packet tasks.
+            if (!stack.vanillaSpawnProbe() || !stack.readPath()) {
+                return false;
+            }
         }
         if (stack.worldgen()) {
             // Do not interfere with the chunk generation pipeline.
@@ -224,11 +244,12 @@ public final class Guard {
     private static StackInfo inspectStack() {
         return WALKER.walk(frames -> {
             boolean modFrame = false;
+            boolean vanillaSpawnProbe = false;
             boolean writePath = false;
             boolean readPath = false;
             boolean worldgen = false;
             boolean exempt = false;
-            StackTraceElement firstModFrame = null;
+            StackTraceElement firstCallerFrame = null;
 
             Iterator<StackWalker.StackFrame> iterator = frames.iterator();
             while (iterator.hasNext()) {
@@ -242,13 +263,19 @@ public final class Guard {
                 if (isReadFrame(className, methodName)) {
                     readPath = true;
                 }
+                if (isVanillaSpawnProbeFrame(className)) {
+                    vanillaSpawnProbe = true;
+                    if (firstCallerFrame == null) {
+                        firstCallerFrame = frame.toStackTraceElement();
+                    }
+                }
                 if (isWorldgenFrame(className)) {
                     worldgen = true;
                 }
                 if (isModFrame(className)) {
                     modFrame = true;
-                    if (firstModFrame == null) {
-                        firstModFrame = frame.toStackTraceElement();
+                    if (firstCallerFrame == null) {
+                        firstCallerFrame = frame.toStackTraceElement();
                     }
                     if (isExempt(className)) {
                         exempt = true;
@@ -256,7 +283,14 @@ public final class Guard {
                 }
             }
 
-            return new StackInfo(modFrame, firstModFrame, writePath, readPath, worldgen, exempt);
+            return new StackInfo(
+                    modFrame,
+                    vanillaSpawnProbe,
+                    firstCallerFrame,
+                    writePath,
+                    readPath,
+                    worldgen,
+                    exempt);
         });
     }
 
@@ -333,6 +367,16 @@ public final class Guard {
     }
 
     /**
+     * Vanilla spawn placement checks are read-only probes. They are safe to
+     * answer with an empty position when the target chunk is not loaded.
+     */
+    private static boolean isVanillaSpawnProbeFrame(String className) {
+        return className.equals("net.minecraft.world.entity.SpawnPlacements")
+                || className.startsWith("net.minecraft.world.entity.SpawnPlacementTypes")
+                || className.equals("net.minecraft.world.level.NaturalSpawner");
+    }
+
+    /**
      * Vanilla read methods that may request a chunk. If one of these is on the
      * stack, a partially loaded chunk must not be allowed to block the tick.
      * This covers the common {@code BlockEntity.setChanged()} path, which ends
@@ -379,7 +423,7 @@ public final class Guard {
             return;
         }
 
-        StackTraceElement caller = stack.firstModFrame();
+        StackTraceElement caller = stack.firstCallerFrame();
         String callerText = caller == null
                 ? "unknown caller"
                 : caller.getClassName() + "." + caller.getMethodName()
@@ -413,11 +457,13 @@ public final class Guard {
     private static final class TickState {
         private int levelTickDepth;
         private int serverTickDepth;
+        private int serverTaskDepth;
     }
 
     private record StackInfo(
             boolean modFrame,
-            StackTraceElement firstModFrame,
+            boolean vanillaSpawnProbe,
+            StackTraceElement firstCallerFrame,
             boolean writePath,
             boolean readPath,
             boolean worldgen,

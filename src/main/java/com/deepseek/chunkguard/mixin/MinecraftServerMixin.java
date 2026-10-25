@@ -23,4 +23,18 @@ public abstract class MinecraftServerMixin {
     private void chunkguard$exitServerTick(BooleanSupplier hasTimeLeft, CallbackInfo ci) {
         Guard.exitServerTick();
     }
+
+    /**
+     * Packets such as player attacks and teleport acknowledgements are drained
+     * between ticks, after {@code tickServer} has returned. Mark that phase too.
+     */
+    @Inject(method = "waitUntilNextTick()V", at = @At("HEAD"), require = 1)
+    private void chunkguard$enterServerTasks(CallbackInfo ci) {
+        Guard.enterServerTasks();
+    }
+
+    @Inject(method = "waitUntilNextTick()V", at = @At("RETURN"), require = 1)
+    private void chunkguard$exitServerTasks(CallbackInfo ci) {
+        Guard.exitServerTasks();
+    }
 }

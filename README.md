@@ -34,8 +34,8 @@ This is not the server thread "generating" a chunk. It is the server thread **wa
 
 ChunkGuard is deliberately generic. It does not patch Lilis, ExtraBiomes or Cobblemon directly.
 
-1. It marks the server tick (`ServerLevel.tick` and `MinecraftServer.tickServer`).
-2. On the server thread, for a mod call stack, if the target chunk is not fully loaded:
+1. It marks the server tick (`ServerLevel.tick` and `MinecraftServer.tickServer`) and the between-tick task phase (`MinecraftServer.waitUntilNextTick`), where player attacks and teleport acknowledgements are processed.
+2. On the server thread, for a mod call stack or a vanilla spawn-placement probe, if the target chunk is not fully loaded:
    - `Level.getHeight` returns the minimum build height.
    - `Level.getFluidState` returns empty fluid.
    - `Level.getBlockEntity` returns `null`.
@@ -44,11 +44,13 @@ ChunkGuard is deliberately generic. It does not patch Lilis, ExtraBiomes or Cobb
    - Chunks that are already fully loaded.
    - Chunk generation/worldgen stacks.
    - Block or entity **writes** (those still load chunks normally).
-   - Vanilla, NeoForge, C2ME, Mixin, and normal library frames.
+   - NeoForge, C2ME, Mixin, and normal library frames.
    - Direct chunk requests that are not part of a read path and already have a chunk holder.
 4. It rate-limits log messages and reports which mod/call site was blocked, so the next offender is easy to find.
 
 A read path (for example `Level.getBlockState` called from `BlockEntity.setChanged`) is still guarded when a chunk holder exists, because a partially loaded chunk can still block the server thread. Writes and direct load requests keep their normal behavior.
+
+Vanilla spawn placement (`SpawnPlacements`, `SpawnPlacementTypes`, `NaturalSpawner`) is also treated as a read-only probe. This is what stops the vanilla zombie-reinforcement loop from walking into unloaded chunks.
 
 The result for a spawner or block-entity probe is that it sees an unloaded/empty position and rejects it, instead of forcing the server thread to wait for a chunk load.
 
@@ -59,8 +61,9 @@ The guard is generic, but these are the confirmed blockers in the affected insta
 - **Lilis Lucky Lures** — `net.satisfy.lilis_lucky_lures.core.util.FloatingPoolsSpawner`
 - **ExtraBiomes** — `net.winepicfin.extrabiomes.entity.custom.GlacierSnowGolemSpawner`
 - **Cobblemon** — `com.cobblemon.mod.common.block.habitat.HabitatBlockEntity` (ticks `setChanged`, which reads neighbouring chunks)
+- **Vanilla zombie reinforcements** — `Zombie.hurt` probes up to 50 random positions with `SpawnPlacements.isSpawnPositionOk`; on Hard difficulty this can walk into unloaded chunks and synchronously load each one
 
-The addon logs at startup whether those classes are present.
+The addon logs at startup whether the named mod classes are present.
 
 ## Installation
 
@@ -68,7 +71,7 @@ The addon logs at startup whether those classes are present.
    ```bash
    ./gradlew build
    ```
-2. Copy `build/libs/chunkguard-1.0.1.jar` into the instance's `mods/` folder.
+2. Copy `build/libs/chunkguard-1.0.2.jar` into the instance's `mods/` folder.
 3. Start the game.
 
 The mixins are common mixins, so the same jar works on a dedicated server.
@@ -81,7 +84,7 @@ The config file is `config/chunkguard-common.toml`.
 | --- | --- | --- |
 | `enabled` | `true` | Master switch. |
 | `guardLevelReads` | `true` | Guard `getHeight`, `getFluidState`, and `getBlockEntity` reads on unloaded chunks. |
-| `guardChunkAccess` | `true` | Guard `ServerChunkCache.getChunk` calls from mods when the chunk is not loaded. This covers `getBlockState` probes, including partially loaded chunks that still have a holder. |
+| `guardChunkAccess` | `true` | Guard `ServerChunkCache.getChunk` calls from mods, and vanilla spawn-placement reads, when the chunk is not loaded. This covers `getBlockState` probes, including partially loaded chunks that still have a holder. |
 | `logBlockedCalls` | `true` | Log prevented calls. |
 | `logFullStack` | `false` | Log a full stack trace the first time a caller is blocked. |
 | `logIntervalSeconds` | `30` | Minimum time between log messages for the same caller. |
@@ -100,6 +103,18 @@ chunk was not loaded during the server tick. Prevented so far: 1
 ```
 
 That is the desired outcome: the probe was skipped instead of stalling the tick.
+
+A vanilla spawn-placement block looks like this:
+
+```text
+[ChunkGuard] Prevented blocking chunk access: ServerChunkCache.getChunk at chunk [...]
+from net.minecraft.world.entity.SpawnPlacementTypes$1.isSpawnPositionOk(...);
+chunk was not loaded during the server tick.
+```
+
+In the 2026-10-25 log, one tick stayed in `Zombie.hurt` for 476 seconds. On Hard difficulty a hurt zombie tries up to 50 reinforcement positions and calls `SpawnPlacements.isSpawnPositionOk` for each. Each position in an unloaded chunk caused a blocking chunk load. With the spawn-placement guard, those candidates are rejected immediately instead.
+
+A separate 92-second tick in the same log came from `Entity.setPosRaw` -> `Level.getChunk` while the server accepted a teleport. That is a vanilla forced destination-chunk load. ChunkGuard deliberately does not skip it, because the entity's position and chunk tracking must stay consistent. If teleport stalls recur, load or pre-generate the destination area before teleporting; it is a different problem from the spawn/read probes.
 
 ## Does this make chunk generation faster?
 
